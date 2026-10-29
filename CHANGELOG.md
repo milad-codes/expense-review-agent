@@ -6,12 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: [S
 
 ### Added
 
+- `npm run demo`: three synthetic claims through the real workflow and HTTP API with a restart, no API key needed
 - `--extractor llm` requires a spending limit and the provider's prices, meters reported tokens and stops before a case
   could exceed the limit; results include calls, tokens and cost
 - Manual GitHub Actions workflow for a measured LLM evaluation with repository secrets
 
 ### Changed
 
+- `npm run dev` and `npm start` read `.env` when it exists, as the setup instructions assumed
+- README rewritten: problem and scope, decisions with trade-offs, the two evaluation modes side by side, troubleshooting
+  and limitations; badges limited to CI, release and licence; new SECURITY.md on data sent to the model provider
 - `--extractor gold` is reported as a policy and workflow regression: it no longer prints extraction metrics, which
   are trivially perfect when labels replace the model
 - The LLM evaluation no longer needs `REVIEW_API_TOKEN`; model output is capped at 1,024 tokens
