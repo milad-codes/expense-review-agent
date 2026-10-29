@@ -28,3 +28,26 @@ jobs:
       - run: npm run typecheck
       - run: npm test -- --coverage
       - run: npm run build
+
+  docker:
+    name: Container image (build + smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t expense-review-agent:ci .
+      - name: Start the image and wait for /health
+        run: |
+          docker run -d --name agent -p 3000:3000 \
+            -e LLM_PROVIDER=openai -e LLM_MODEL=ci-placeholder -e OPENAI_API_KEY=ci-placeholder \
+            -e REVIEW_API_TOKEN=ci-reviewer-token-0123 \
+            expense-review-agent:ci
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:3000/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs agent
+          exit 1
+      - name: Image runs as non-root and persists to /data
+        run: |
+          test "$(docker exec agent id -u)" != "0"
+          docker exec agent ls /data/claims.sqlite /data/checkpoints.sqlite

@@ -130,3 +130,29 @@ describe('review workflow', () => {
     await expect(service.submit({ employeeId: '', receiptText: 'x' })).rejects.toBeInstanceOf(ZodError);
   });
 });
+
+describe('provider failures', () => {
+  it('keeps the claim and resumes from the failed step on retry', async () => {
+    const { ProcessingError } = await import('../src/review-service.js');
+    let calls = 0;
+    const flaky = {
+      async extract() {
+        calls += 1;
+        if (calls === 1) throw new Error('connect ECONNREFUSED api.example.com');
+        return (await import('./fixtures.js')).lunch();
+      },
+    };
+    const { service } = createService({ extractor: flaky });
+    const failure = await service.submit(claim('routine lunch')).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(ProcessingError);
+    const claimId = (failure as InstanceType<typeof ProcessingError>).claimId;
+    expect(await service.get(claimId)).toMatchObject({
+      status: 'failed',
+      error: expect.stringMatching(/ECONNREFUSED/),
+    });
+
+    const view = await service.retry(claimId);
+    expect(view.status).toBe('approved');
+    expect(calls).toBe(2);
+  });
+});
