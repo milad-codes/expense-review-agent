@@ -27,6 +27,8 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm test -- --coverage
+      - name: Evaluation regression gate (gold extraction)
+        run: npm run eval -- --extractor gold --min-route-accuracy 1 --min-finding-f1 1
       - run: npm run build
 
   docker:
