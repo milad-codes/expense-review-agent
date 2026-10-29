@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.2.0] — 2026-10-29
 
 ### Added
 
@@ -35,4 +35,5 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: [S
 - Fastify API, LLM receipt extraction with grounding check, retry after provider failures, container image (#7)
 - Evaluation dataset and harness with a CI regression gate; README and ADRs
 
+[0.2.0]: https://github.com/milad-codes/expense-review-agent/releases/tag/v0.2.0
 [0.1.0]: https://github.com/milad-codes/expense-review-agent/releases/tag/v0.1.0
