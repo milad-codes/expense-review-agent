@@ -22,7 +22,7 @@ export const ClaimInputSchema = z.object({
 });
 export type ClaimInput = z.input<typeof ClaimInputSchema>;
 
-export type ClaimStatus = 'approved' | 'rejected' | 'needs_review' | 'processing';
+export type ClaimStatus = 'approved' | 'rejected' | 'needs_review' | 'processing' | 'failed';
 
 export interface ClaimView {
   claimId: string;
@@ -35,6 +35,8 @@ export interface ClaimView {
   review: ReviewRecord | null;
   outcome: Outcome | null;
   reviewRequest: ReviewRequest | null;
+  /** Set when a step failed (e.g. the LLM provider was unreachable); the claim can be retried. */
+  error: string | null;
   events: AuditEvent[];
 }
 
@@ -43,6 +45,19 @@ export class ClaimNotFoundError extends Error {
 }
 export class NotAwaitingReviewError extends Error {
   override readonly name = 'NotAwaitingReviewError';
+}
+/** A step failed for a reason outside the claim (e.g. provider outage). The claim exists and can be retried. */
+export class ProcessingError extends Error {
+  override readonly name = 'ProcessingError';
+  constructor(
+    readonly claimId: string,
+    cause: unknown,
+  ) {
+    super(`Processing of claim ${claimId} failed: ${(cause as Error)?.message ?? String(cause)}`, { cause });
+  }
+}
+export class NotRetryableError extends Error {
+  override readonly name = 'NotRetryableError';
 }
 
 /**
@@ -64,8 +79,28 @@ export class ReviewService {
     const claimId = (this.options.newId ?? randomUUID)();
     if (await this.get(claimId)) throw new Error(`Claim id ${claimId} already exists`);
     const submittedAt = (this.options.now?.() ?? new Date()).toISOString();
-    await this.graph.invoke({ claimId, submittedAt, ...claim }, this.config(claimId));
+    try {
+      await this.graph.invoke({ claimId, submittedAt, ...claim }, this.config(claimId));
+    } catch (error) {
+      throw new ProcessingError(claimId, error);
+    }
     return this.getOrFail(claimId);
+  }
+
+  /** Re-runs a failed step from its checkpoint (LangGraph resumes a thread when invoked with null input). */
+  async retry(claimId: string): Promise<ClaimView> {
+    return this.withLock(claimId, async () => {
+      const current = await this.get(claimId);
+      if (!current) throw new ClaimNotFoundError(`Claim ${claimId} not found`);
+      if (current.status !== 'failed')
+        throw new NotRetryableError(`Claim ${claimId} is ${current.status}, not failed`);
+      try {
+        await this.graph.invoke(null, this.config(claimId));
+      } catch (error) {
+        throw new ProcessingError(claimId, error);
+      }
+      return this.getOrFail(claimId);
+    });
   }
 
   async get(claimId: string): Promise<ClaimView | null> {
@@ -76,9 +111,17 @@ export class ReviewService {
     const reviewRequest = waiting
       ? ((snapshot.tasks.flatMap((t) => t.interrupts)[0]?.value as ReviewRequest | undefined) ?? null)
       : null;
+    const failed = snapshot.tasks.find((t) => t.error !== undefined && t.error !== null);
+    const error = failed ? String((failed.error as Error)?.message ?? failed.error) : null;
     return {
       claimId: values.claimId,
-      status: values.outcome ? values.outcome.status : waiting ? 'needs_review' : 'processing',
+      status: values.outcome
+        ? values.outcome.status
+        : waiting
+          ? 'needs_review'
+          : error
+            ? 'failed'
+            : 'processing',
       employeeId: values.employeeId ?? '',
       businessPurpose: values.businessPurpose ?? '',
       submittedAt: values.submittedAt ?? '',
@@ -87,6 +130,7 @@ export class ReviewService {
       review: values.review ?? null,
       outcome: values.outcome ?? null,
       reviewRequest,
+      error,
       events: values.events ?? [],
     };
   }
