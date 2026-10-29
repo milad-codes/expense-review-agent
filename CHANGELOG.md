@@ -2,6 +2,13 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- The grounding check accepted a total that only appeared inside a larger printed number (4.86 in `14,86`); totals
+  must now be printed as whole amounts. Apostrophe thousands separators (`1'234.50`) are recognised (#9)
+
 ## [0.1.0] — 2026-10-29
 
 ### Added
