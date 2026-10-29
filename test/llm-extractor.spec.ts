@@ -53,12 +53,25 @@ describe('totalIsGrounded', () => {
     ['Total: $1,234.50', 1234.5],
     ['Gesamt 1.234,50 €', 1234.5],
     ['TOTAL 12.00', 12],
+    ['Total 1 234,50 EUR', 1234.5],
+    ["Total CHF 1'234.50", 1234.5],
+    ['SUMME\nEUR 48,60', 48.6],
   ])('finds the total in %j', (text, total) => {
     expect(totalIsGrounded(text, total)).toBe(true);
   });
 
   it('does not match a different amount', () => {
     expect(totalIsGrounded('SUMME 48,60', 4.86)).toBe(false);
+  });
+
+  it.each([
+    ['GESAMT EUR 14,86', 4.86],
+    ['Summe 1.234,50 €', 234.5],
+    ['Total: $1,234.50', 234.5],
+    ['Betrag 148,60', 48.6],
+    ['2x Menü 340,00', 40],
+  ])('does not accept a total that is only part of a larger number in %j', (text, total) => {
+    expect(totalIsGrounded(text, total)).toBe(false);
   });
 });
 

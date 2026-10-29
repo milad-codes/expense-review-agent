@@ -35,7 +35,7 @@ export interface LlmExtractorOptions {
   logger?: Logger;
 }
 
-/** Amount formats a printed total may use: 1234.5 → "1234.50", "1234,50", "1.234,50", "1,234.50". */
+/** Amount formats a printed total may use: 1234.5 → "1234.50", "1234,50", "1.234,50", "1,234.50", "1'234.50". */
 function amountVariants(total: number): string[] {
   const [int = '0', dec = '00'] = total.toFixed(2).split('.');
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, '#');
@@ -44,13 +44,24 @@ function amountVariants(total: number): string[] {
     `${int},${dec}`,
     `${grouped.replaceAll('#', '.')},${dec}`,
     `${grouped.replaceAll('#', ',')}.${dec}`,
+    `${grouped.replaceAll('#', "'")}.${dec}`,
   ];
 }
 
-/** The extracted total must appear in the receipt text; otherwise the model invented or computed it. */
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Drops a space used as a thousands separator ("1 234,50" → "1234,50") without joining unrelated numbers. */
+const joinSpacedThousands = (text: string) => text.replace(/(\d)[ \u00a0\u202f](?=\d{3}(?!\d))/g, '$1');
+
+/**
+ * The extracted total must be printed on the receipt as a whole amount; otherwise the model invented or computed it.
+ * "Whole" matters: 4.86 must not count as grounded just because "14,86" or "1.234,86" is printed.
+ */
 export function totalIsGrounded(receiptText: string, total: number): boolean {
-  const text = receiptText.replace(/\s+/g, '');
-  return amountVariants(total).some((variant) => text.includes(variant));
+  const text = joinSpacedThousands(receiptText);
+  return amountVariants(total).some((variant) =>
+    new RegExp(`(?<![\\d.,'])${escapeRegExp(variant)}(?!\\d)`).test(text),
+  );
 }
 
 const isInvalidOutput = (error: unknown): boolean =>
