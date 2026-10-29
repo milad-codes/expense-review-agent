@@ -3,8 +3,8 @@ import { ExtractionError } from '../src/extraction/extractor.js';
 import { LlmReceiptExtractor, totalIsGrounded } from '../src/extraction/llm-extractor.js';
 import { lunch } from './fixtures.js';
 
-const RECEIPT_TEXT = `CAFÉ LUITPOLD
-Brienner Str. 11, München
+const RECEIPT_TEXT = `CAFÉ AM BEISPIELPLATZ
+Beispielstraße 11, München
 20.10.2026  12:41
 2x Mittagsmenü        43,80
 2x Wasser              4,80

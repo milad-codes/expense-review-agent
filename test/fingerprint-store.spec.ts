@@ -4,8 +4,8 @@ import { lunch } from './fixtures.js';
 
 describe('claimFingerprint', () => {
   it('ignores case, accents and punctuation in the merchant name', () => {
-    expect(claimFingerprint('e1', lunch({ merchant: 'Café Luitpold' }))).toBe(
-      claimFingerprint('e1', lunch({ merchant: 'CAFE  LUITPOLD.' })),
+    expect(claimFingerprint('e1', lunch({ merchant: 'Café am Beispielplatz' }))).toBe(
+      claimFingerprint('e1', lunch({ merchant: 'CAFE  AM BEISPIELPLATZ.' })),
     );
   });
 

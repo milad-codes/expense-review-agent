@@ -42,7 +42,7 @@ describe('evaluation metrics', () => {
   it('compares receipts with tolerance for amounts and merchant spelling', () => {
     const matches = compareReceipts(
       lunch(),
-      lunch({ merchant: 'CAFE LUITPOLD GmbH', total: 48.604, nights: 1 }),
+      lunch({ merchant: 'CAFE AM BEISPIELPLATZ GmbH', total: 48.604, nights: 1 }),
     );
     expect(matches).toMatchObject({ merchant: true, total: true, nights: false });
   });
