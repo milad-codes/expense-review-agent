@@ -1,0 +1,66 @@
+name: LLM evaluation (manual)
+
+# Runs the labelled receipts through a real model. Costs money: it needs an API key in the repository secrets
+# (OPENAI_API_KEY or ANTHROPIC_API_KEY) and refuses to start without a spending limit and current prices.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Model provider
+        required: true
+        type: choice
+        options: [openai, anthropic]
+      model:
+        description: Model id of that provider
+        required: true
+        type: string
+      max_cost_usd:
+        description: Stop before the run could cost more than this (USD)
+        required: true
+        default: '1'
+        type: string
+      input_usd_per_mtok:
+        description: Provider price per million input tokens (USD)
+        required: true
+        type: string
+      output_usd_per_mtok:
+        description: Provider price per million output tokens (USD)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: LLM evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Evaluate
+        env:
+          LLM_PROVIDER: ${{ inputs.provider }}
+          LLM_MODEL: ${{ inputs.model }}
+          MAX_COST_USD: ${{ inputs.max_cost_usd }}
+          INPUT_PRICE: ${{ inputs.input_usd_per_mtok }}
+          OUTPUT_PRICE: ${{ inputs.output_usd_per_mtok }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          npm run eval -- --extractor llm --max-cost-usd "$MAX_COST_USD" \
+            --input-usd-per-mtok "$INPUT_PRICE" --output-usd-per-mtok "$OUTPUT_PRICE" | tee eval-output.md
+      - name: Job summary
+        if: always()
+        run: if [ -f eval-output.md ]; then cat eval-output.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llm-evaluation
+          path: evals/results/
+          if-no-files-found: ignore

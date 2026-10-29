@@ -4,6 +4,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- `--extractor llm` requires a spending limit and the provider's prices, meters reported tokens and stops before a case
+  could exceed the limit; results include calls, tokens and cost
+- Manual GitHub Actions workflow for a measured LLM evaluation with repository secrets
+
+### Changed
+
+- `--extractor gold` is reported as a policy and workflow regression: it no longer prints extraction metrics, which
+  are trivially perfect when labels replace the model
+- The LLM evaluation no longer needs `REVIEW_API_TOKEN`; model output is capped at 1,024 tokens
+- The evaluation set uses fictional merchants and addresses instead of real businesses
+
 ### Fixed
 
 - The grounding check accepted a total that only appeared inside a larger printed number (4.86 in `14,86`); totals

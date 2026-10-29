@@ -45,7 +45,7 @@ describe('review workflow', () => {
       expect(view.outcome).toBeNull();
       expect(view.reviewRequest).toMatchObject({
         claimId: view.claimId,
-        receipt: { merchant: 'Tantris' },
+        receipt: { merchant: 'Restaurant zum Musterhof' },
         evaluation: {
           route: 'human_review',
           findings: [expect.objectContaining({ code: 'OVER_LIMIT' }), expect.anything()],

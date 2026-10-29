@@ -54,7 +54,7 @@ describe('HTTP API', () => {
     expect(pending.json()).toEqual([
       expect.objectContaining({
         claimId,
-        merchant: 'Tantris',
+        merchant: 'Restaurant zum Musterhof',
         findings: ['OVER_LIMIT', 'ABOVE_AUTO_APPROVAL_LIMIT'],
       }),
     ]);

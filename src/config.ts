@@ -17,12 +17,24 @@ const EnvSchema = z
 
 export type Env = z.infer<typeof EnvSchema>;
 
-/** Fails fast with every invalid variable listed. */
-export function loadEnv(raw: Record<string, string | undefined> = process.env): Env {
-  const parsed = EnvSchema.safeParse(raw);
+/** The subset the LLM evaluation needs: it runs no HTTP server, so no reviewer token or port. */
+const LlmEnvSchema = EnvSchema.pick({ LLM_PROVIDER: true, LLM_MODEL: true, EXTRACTION_MAX_ATTEMPTS: true });
+export type LlmEnv = z.infer<typeof LlmEnvSchema>;
+
+function parseEnv<T>(schema: z.ZodType<T>, raw: Record<string, string | undefined>): T {
+  const parsed = schema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
     throw new Error(`Invalid environment configuration: ${issues}`);
   }
   return parsed.data;
+}
+
+/** Fails fast with every invalid variable listed. */
+export function loadEnv(raw: Record<string, string | undefined> = process.env): Env {
+  return parseEnv(EnvSchema, raw);
+}
+
+export function loadLlmEnv(raw: Record<string, string | undefined> = process.env): LlmEnv {
+  return parseEnv(LlmEnvSchema, raw);
 }

@@ -3,7 +3,7 @@ import type { PolicyContext } from '../src/policy/policy.js';
 
 /** A Tuesday lunch for two, comfortably inside every limit. */
 export const lunch = (overrides: Partial<Receipt> = {}): Receipt => ({
-  merchant: 'Café Luitpold',
+  merchant: 'Café am Beispielplatz',
   date: '2026-10-20',
   currency: 'EUR',
   total: 48.6,

@@ -1,5 +1,6 @@
 import { ChatAnthropic } from '@langchain/anthropic';
 import { ChatOpenAI } from '@langchain/openai';
+import { UsageMeter } from '../src/eval/budget.js';
 import { createChatModel } from '../src/extraction/models.js';
 
 describe('createChatModel', () => {
@@ -15,5 +16,21 @@ describe('createChatModel', () => {
     expect(createChatModel({ LLM_PROVIDER: 'anthropic', LLM_MODEL: 'model-b' })).toBeInstanceOf(
       ChatAnthropic,
     );
+  });
+
+  it('caps output tokens and attaches callbacks to the model itself', () => {
+    const meter = new UsageMeter();
+    const openai = createChatModel(
+      { LLM_PROVIDER: 'openai', LLM_MODEL: 'model-a' },
+      { maxTokens: 300, callbacks: [meter] },
+    );
+    expect((openai as ChatOpenAI).maxTokens).toBe(300);
+    expect(openai.callbacks).toEqual([meter]);
+    const anthropic = createChatModel(
+      { LLM_PROVIDER: 'anthropic', LLM_MODEL: 'model-b' },
+      { callbacks: [meter] },
+    );
+    expect((anthropic as ChatAnthropic).maxTokens).toBe(1024);
+    expect(anthropic.callbacks).toEqual([meter]);
   });
 });

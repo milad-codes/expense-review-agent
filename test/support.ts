@@ -23,7 +23,7 @@ export class TableExtractor implements ReceiptExtractor {
 
 export const RECEIPTS: Record<string, Receipt> = {
   'routine lunch': lunch(),
-  'big dinner': lunch({ merchant: 'Tantris', total: 380, attendees: 2 }),
+  'big dinner': lunch({ merchant: 'Restaurant zum Musterhof', total: 380, attendees: 2 }),
   'future taxi': lunch({
     merchant: 'Isar Taxi',
     category: 'ground_transport',
