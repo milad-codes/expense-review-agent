@@ -4,6 +4,6 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['test/**/*.spec.ts'],
-    coverage: { provider: 'v8', include: ['src/**/*.ts'] },
+    coverage: { provider: 'v8', include: ['src/**/*.ts'], exclude: ['src/server.ts', 'src/eval/run.ts'] },
   },
 });
