@@ -1,17 +1,38 @@
 # expense-review-agent
 
 [![CI](https://github.com/milad-codes/expense-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/milad-codes/expense-review-agent/actions/workflows/ci.yml)
-![LangGraph.js](https://img.shields.io/badge/LangGraph.js-1.x-1C3C3C)
-![Node 22](https://img.shields.io/badge/node-22-339933)
-![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+[![Release](https://img.shields.io/github/v/release/milad-codes/expense-review-agent)](https://github.com/milad-codes/expense-review-agent/releases)
+[![License: MIT](https://img.shields.io/github/license/milad-codes/expense-review-agent)](LICENSE)
 
-An AI agent that reviews employee expense claims, built with **LangGraph.js**. It reads messy receipt text with an LLM,
-applies company policy with deterministic code, decides routine claims on its own and **pauses for a human reviewer**
-on everything else — for as long as it takes, across restarts.
+An agent that reviews employee expense claims, built with LangGraph.js. The work is split three ways:
 
-The design rule: **the model extracts facts, code makes decisions, people handle exceptions.**
+- a language model reads the receipt;
+- deterministic code applies the expense policy;
+- a person decides what the policy can't settle.
 
-## How a claim flows
+Claims that wait for a person survive restarts.
+
+## The problem
+
+Most expense claims are routine, and a long tail needs judgement.
+
+- **If a model makes the decisions,** they are hard to audit, and receipt text is untrusted input that can carry instructions.
+- **If people check everything,** it's slow.
+
+This project keeps each part where it is reliable. The model only extracts facts. Code decides and explains every decision. People handle the exceptions.
+
+**In scope:** receipt text to a structured receipt, policy evaluation, routing, human review with durable waiting, an HTTP API, an evaluation harness.
+**Out of scope:** reading images (the input is receipt text), employee authentication, payment or accounting integration, live exchange rates, review by more than one person.
+
+## Design decisions
+
+| Decision                                                                                                           | Why                                                                                                                                                       | Trade-off                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| The model extracts, code decides ([ADR 0001](docs/adr/0001-model-extracts-code-decides.md))                        | Decisions are deterministic, explainable and unit-tested. Text in a receipt can't approve a claim; the evaluation set includes such an injection attempt. | Policy changes need a code change. Extraction can still be wrong, so the next row exists.                       |
+| Grounding check on the total                                                                                       | The extracted total must be printed on the receipt as a whole amount, so an invented or altered total goes to a person.                                   | Receipts with unusual number formats go to human review too.                                                    |
+| One LangGraph thread per claim, SQLite checkpoints ([ADR 0002](docs/adr/0002-durable-threads-for-human-review.md)) | A claim can wait at `interrupt()` for days and resume after a restart (tested).                                                                           | One process and a local SQLite file. Several instances would need a shared checkpointer and a distributed lock. |
+| Provider failures are not "unreadable receipts"                                                                    | When the LLM provider fails, the API answers `503`, keeps the claim and resumes from the failed step on `POST /claims/:id/retry`.                         | Clients have to retry.                                                                                          |
+| One decision per claim                                                                                             | Two reviewers can't both decide the same claim (tested).                                                                                                  | The lock is held in process memory.                                                                             |
 
 ```mermaid
 flowchart LR
@@ -25,121 +46,136 @@ flowchart LR
   finalize --> done([approved / rejected<br/>+ audit trail])
 ```
 
-```mermaid
-sequenceDiagram
-  participant E as Employee app
-  participant A as Agent API
-  participant G as LangGraph thread (SQLite checkpoints)
-  participant R as Reviewer
-  E->>A: POST /claims (receipt text)
-  A->>G: invoke(thread_id = claimId)
-  G-->>A: interrupted at human_review (OVER_LIMIT)
-  A-->>E: 201 { status: "needs_review" }
-  Note over G: process may restart; state is in SQLite
-  R->>A: GET /reviews/pending
-  R->>A: POST /claims/:id/review { approve, comment }
-  A->>G: invoke(Command{ resume })
-  G-->>A: finalize → approved
-```
-
-## What it demonstrates
-
-| Concern                      | Implementation                                                                                                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Structured extraction        | `withStructuredOutput` with a zod schema; works with OpenAI and Anthropic; the model can _decline_ an unreadable receipt instead of guessing                  |
-| Hallucinated numbers         | the extracted total must be printed on the receipt (`48,60`, `1.234,50`, `$1,234.50` …), otherwise a person checks it                                         |
-| Prompt injection in receipts | receipt text is treated as data; decisions never come from the model (an injection case is in the eval set)                                                   |
-| Policy                       | pure, unit-tested function: category limits, alcohol deduction, submission window, weekend rules, duplicates, approval limit — every rule explains itself     |
-| Human-in-the-loop            | `interrupt()` with a zod response schema; invalid decisions are rejected and the claim keeps waiting                                                          |
-| Durability                   | one LangGraph thread per claim, SQLite checkpointer; a test closes everything and resumes the review in a new process                                         |
-| Failure handling             | provider outages are not mistaken for unreadable receipts: the API answers `503`, the claim is kept and `POST /claims/:id/retry` resumes from the failed step |
-| Concurrency                  | two reviewers cannot both decide the same claim (tested)                                                                                                      |
-| Evaluation                   | 21 labelled claims; gold-extraction run is a CI gate, LLM run reports extraction and routing quality                                                          |
-| Observability                | pino logs with per-node timings and redaction, audit trail per claim, optional LangSmith tracing                                                              |
-
 ## Policy
 
-| Rule                                                                                                                                                                                                                                     | Severity                           |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| Duplicate (same employee, merchant, date, amount) · receipt after submission date · older than 90 days · nothing reimbursable                                                                                                            | **reject**                         |
-| Meal > €60 per person · hotel > €180 per night · taxi/train > €150 · flight > €800 · office > €200 · software > €100 · total > €250 · weekend meal/taxi · no business purpose · unknown currency · category "other" · unreadable receipt | **human review**                   |
-| Alcohol                                                                                                                                                                                                                                  | deducted, the rest can be approved |
+| Rule                                                                                                                                                                                                                                                                         | Outcome                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| Duplicate (same employee, merchant, date and amount) · receipt dated after submission · older than 90 days · nothing reimbursable                                                                                                                                            | **reject**                         |
+| Meal over €60 per person · hotel over €180 per night · taxi or train over €150 · flight over €800 · office supplies over €200 · software over €100 · total over €250 · weekend meal or taxi · no business purpose · unknown currency · category "other" · unreadable receipt | **human review**                   |
+| Alcohol                                                                                                                                                                                                                                                                      | deducted; the rest can be approved |
 
-## API
+The limits are example values in `src/policy/policy.ts`, not any real company's policy.
 
-| Method | Path                 |                                                                                                                                                            |
-| ------ | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/claims`            | `{ employeeId, receiptText, businessPurpose }` → `201` with status `approved`, `rejected` or `needs_review`; `503` + `claimId` if the LLM provider is down |
-| GET    | `/claims/:id`        | full view incl. receipt, findings, review request, outcome and audit trail                                                                                 |
-| POST   | `/claims/:id/retry`  | resume a failed claim from its checkpoint                                                                                                                  |
-| GET    | `/reviews/pending`   | reviewer token; claims waiting for a decision                                                                                                              |
-| POST   | `/claims/:id/review` | reviewer token; `{ decision: "approve" \| "reject", reviewer, comment }`                                                                                   |
-| GET    | `/health`            |                                                                                                                                                            |
-
-Errors are `application/problem+json`.
-
-## Run it
+## Try it without an API key
 
 ```bash
-cp .env.example .env            # choose LLM_PROVIDER, LLM_MODEL and set the API key
 npm ci
-npm run dev                     # http://localhost:3000
+npm run demo
+```
 
-# or as a container (SQLite on a volume)
-docker build -t expense-review-agent .
-docker run -p 3000:3000 --env-file .env -v era-data:/data expense-review-agent
+```text
+team lunch     → approved     findings: none
+client dinner  → needs_review findings: OVER_LIMIT, ABOVE_AUTO_APPROVAL_LIMIT
+drinks only    → rejected     findings: ALCOHOL_EXCLUDED, NOTHING_REIMBURSABLE
+
+restarting: closing the API and the SQLite files, then opening them again …
+pending after restart: 28e16067-… (€380)
+reviewer approves → approved
+audit trail: extract → evaluate → human_review → finalize
+```
+
+The demo sends three synthetic receipts through the HTTP API, restarts, and approves the waiting claim. Labelled extraction stands in for the model. Everything else is the real code: the policy, the LangGraph workflow, the SQLite checkpoints and the claim store.
+
+## Run the API with a model
+
+```bash
+cp .env.example .env    # LLM_PROVIDER, LLM_MODEL, the provider's API key, REVIEW_API_TOKEN
+npm ci
+npm run dev             # http://localhost:3000; reads .env
 ```
 
 ```bash
 curl -s localhost:3000/claims -H 'content-type: application/json' -d '{
   "employeeId": "emp-42",
-  "businessPurpose": "Dinner with the ACME CTO to close the contract",
-  "receiptText": "TANTRIS München\n21.10.2026 Gäste: 2\n2x Menü 340,00\nGESAMT EUR 380,00"
+  "businessPurpose": "Dinner with the customer to close the contract",
+  "receiptText": "RESTAURANT ZUM MUSTERHOF\n21.10.2026 Gäste: 2\n2x Menü 340,00\nGESAMT EUR 380,00"
 }'
 ```
 
-## Evaluation
+You can also run it as a container: `docker build -t expense-review-agent .`, then `docker run -p 3000:3000 --env-file .env -v era-data:/data expense-review-agent`.
 
-```bash
-npm run eval -- --extractor gold   # labelled receipts → policy + workflow only (CI gate: 100 % route accuracy)
-npm run eval -- --extractor llm    # real model: extraction accuracy per field, route accuracy, finding F1, latency
-```
+| Method | Path                 |                                                                                                                                                    |
+| ------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/claims`            | `{ employeeId, receiptText, businessPurpose }` → `201` with `approved`, `rejected` or `needs_review`; `503` and a `claimId` if the provider failed |
+| GET    | `/claims/:id`        | receipt, findings, review request, outcome and audit trail                                                                                         |
+| POST   | `/claims/:id/retry`  | resume a failed claim from its checkpoint                                                                                                          |
+| GET    | `/reviews/pending`   | reviewer token; claims waiting for a decision                                                                                                      |
+| POST   | `/claims/:id/review` | reviewer token; `{ decision: "approve" \| "reject", reviewer, comment }`                                                                           |
+| GET    | `/health`            |                                                                                                                                                    |
 
-The dataset (`evals/claims.jsonl`) covers routine claims, every policy rule, foreign currencies, an unreadable receipt,
-a duplicate and a prompt-injection attempt. Results are written to `evals/results/`. No model scores are published
-here: they depend on the model you choose, so run the LLM evaluation with your own key.
+Errors are `application/problem+json`.
+
+## Evaluation: two different measurements
+
+|                  | Policy and workflow regression                                             | LLM evaluation                                                                                                |
+| ---------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| What it measures | Policy and routing, given correct extraction: the labels replace the model | The model's extraction per field, plus routing and findings end to end                                        |
+| Model calls      | none                                                                       | yes, paid                                                                                                     |
+| Command          | `npm run eval -- --extractor gold`                                         | `npm run eval -- --extractor llm --max-cost-usd 1 --input-usd-per-mtok <price> --output-usd-per-mtok <price>` |
+| Where it runs    | CI, on every change; it must stay at 100 %                                 | by hand, locally or through the "LLM evaluation (manual)" workflow with repository secrets                    |
+
+The LLM evaluation refuses to start without a spending limit and the model's current prices from the provider's pricing page. It meters the tokens the provider reports. It stops before a case whose worst case could exceed the limit, and records calls, tokens and cost with the results in `evals/results/`.
+
+The dataset, [`evals/claims.jsonl`](evals/claims.jsonl), has 21 synthetic claims that I wrote and labelled. They cover:
+
+- every policy rule
+- foreign currencies
+- an unreadable receipt
+- a duplicate
+- a prompt-injection attempt
+
+That's enough to catch regressions, not to claim accuracy.
+
+**No model scores are published yet.** They'll appear here only from a measured run, with the model, date, cost and dataset version.
 
 ## Tests
 
-```bash
-npm test        # 83 tests: policy, workflow, persistence across restarts, extractor (fake model), HTTP API, metrics
-```
+`npm test` covers:
+
+- every policy rule
+- the workflow, including a restart while a claim waits and a concurrent second decision
+- the extractor against a fake model: grounding, retries after invalid output, provider errors
+- the HTTP API
+- the evaluation metrics, the token meter and the budget
+
+## Troubleshooting
+
+| Symptom                                                                   | Cause and fix                                                                                          |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `Invalid environment configuration: …`                                    | Set the listed variables in `.env`. `LLM_MODEL` has no default on purpose.                             |
+| `401` on `/reviews/pending` or `/review`                                  | Send `Authorization: Bearer <REVIEW_API_TOKEN>`.                                                       |
+| `503` with a `claimId`                                                    | The provider failed (network, quota, key). The claim is saved; call `POST /claims/<id>/retry` later.   |
+| Every receipt goes to human review, with "does not appear on the receipt" | The model returned totals that aren't printed on the receipts. Check the model and the receipt format. |
+| `npm run eval -- --extractor llm` exits with 2                            | The spending limit, prices or provider settings are missing; the message says which.                   |
+| It exits with 3                                                           | The budget stopped the run. The partial results are saved.                                             |
+| `database is locked`                                                      | Two processes share one `DATA_DIR`. Run one instance per directory.                                    |
+
+## Limitations
+
+- One process: the decision lock is in memory, and the checkpoints and claims are SQLite files.
+- Exchange rates are fixed reference values for EUR, USD, GBP, CHF, TRY and PLN. Other currencies go to review.
+- No employee authentication (expected from a gateway), and reviewers share one token.
+- The input is receipt text, not images.
+- No measured model accuracy yet, and the 21-case dataset is small.
 
 ## Project layout
 
-```
+```text
 src/
   domain/        receipt schema, money
   policy/        policy engine, duplicate fingerprint
   extraction/    extractor port, LLM extractor, model factory
   graph/         LangGraph state and graph
-  store/         claim store (in-memory, SQLite)
+  store/         claim store (in memory, SQLite)
   http/          Fastify API
-  eval/          evaluation harness and metrics
-  review-service.ts, server.ts
-evals/claims.jsonl
-docs/adr/
+  eval/          evaluation harness, metrics, token budget
+scripts/demo.ts  walkthrough without a model
+evals/           labelled synthetic claims
+docs/adr/        design decisions
 ```
 
-Design decisions: [0001 the model extracts, code decides](docs/adr/0001-model-extracts-code-decides.md) ·
-[0002 durable threads for human review](docs/adr/0002-durable-threads-for-human-review.md)
+Changes are listed in [CHANGELOG.md](CHANGELOG.md), and releases are on the [releases page](https://github.com/milad-codes/expense-review-agent/releases).
 
-## Limits
+## Security and licence
 
-- Single-process locking; several instances would need a database lock or LangGraph Platform's thread queue.
-- Fixed reference exchange rates.
-- No employee authentication (expected from an SSO gateway); reviewers share one token.
-
-## License
-
-MIT
+See [SECURITY.md](SECURITY.md): what is sent to the model provider, and the checks to make before deploying. Released under the [MIT licence](LICENSE).

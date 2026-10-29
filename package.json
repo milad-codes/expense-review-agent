@@ -32,13 +32,14 @@
   "description": "LangGraph.js agent that reviews expense claims with deterministic policy tools and human-in-the-loop approvals",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/server.js",
-    "dev": "tsx watch src/server.ts",
+    "start": "node --env-file-if-exists=.env dist/server.js",
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint src test",
+    "lint": "oxlint src test scripts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "eval": "tsx src/eval/run.ts"
+    "eval": "tsx src/eval/run.ts",
+    "demo": "tsx scripts/demo.ts"
   }
 }
