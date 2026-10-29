@@ -170,8 +170,15 @@ function checkCategoryLimit(
 
   switch (receipt.category) {
     case 'meal': {
-      const perPerson = roundCents(reimbursableEur / receipt.attendees);
-      if (perPerson > policy.mealPerPersonEur) over(perPerson, policy.mealPerPersonEur, ' per person');
+      const allowance = roundCents(policy.mealPerPersonEur * receipt.attendees);
+      if (reimbursableEur > allowance) {
+        add(
+          'OVER_LIMIT',
+          'review',
+          `${eur(reimbursableEur)} exceeds the ${eur(allowance)} total meal allowance ` +
+            `(${eur(policy.mealPerPersonEur)} per person for ${receipt.attendees} people).`,
+        );
+      }
       return;
     }
     case 'lodging': {
@@ -183,8 +190,15 @@ function checkCategoryLimit(
         );
         return;
       }
-      const perNight = roundCents(reimbursableEur / receipt.nights);
-      if (perNight > policy.lodgingPerNightEur) over(perNight, policy.lodgingPerNightEur, ' per night');
+      const allowance = roundCents(policy.lodgingPerNightEur * receipt.nights);
+      if (reimbursableEur > allowance) {
+        add(
+          'OVER_LIMIT',
+          'review',
+          `${eur(reimbursableEur)} exceeds the ${eur(allowance)} total lodging allowance ` +
+            `(${eur(policy.lodgingPerNightEur)} per night for ${receipt.nights} nights).`,
+        );
+      }
       return;
     }
     case 'ground_transport':

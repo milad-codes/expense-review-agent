@@ -42,7 +42,7 @@ describe('evaluateClaim', () => {
       const over = evaluateClaim(lunch({ total: 130, attendees: 2 }), context());
       expect(over.findings[0]).toMatchObject({
         code: 'OVER_LIMIT',
-        message: expect.stringContaining('€65.00 per person'),
+        message: expect.stringContaining('€130.00 exceeds the €120.00 total meal allowance'),
       });
       expect(over.route).toBe('human_review');
     });
@@ -59,6 +59,23 @@ describe('evaluateClaim', () => {
       expect(codes(evaluateClaim(hotel, context()))).toEqual(['ABOVE_AUTO_APPROVAL_LIMIT']);
       expect(codes(evaluateClaim({ ...hotel, total: 400 }, context()))).toContain('OVER_LIMIT');
       expect(codes(evaluateClaim({ ...hotel, nights: 0 }, context()))).toContain('MISSING_NIGHTS');
+    });
+
+    it.each([
+      ['meal', 180],
+      ['lodging', 540],
+    ] as const)('checks the %s allowance before rounding the per-unit amount', (category, allowance) => {
+      const receipt = lunch({ category, attendees: 3, nights: 3 });
+      const above = evaluateClaim({ ...receipt, total: allowance + 0.01 }, context());
+      expect(codes(above)).toContain('OVER_LIMIT');
+      expect(above.route).toBe('human_review');
+      expect(above.findings.find((finding) => finding.code === 'OVER_LIMIT')?.message).toContain(
+        `€${(allowance + 0.01).toFixed(2)} exceeds the €${allowance.toFixed(2)} total`,
+      );
+      expect(codes(evaluateClaim({ ...receipt, total: allowance }, context()))).not.toContain('OVER_LIMIT');
+      expect(codes(evaluateClaim({ ...receipt, total: allowance - 0.01 }, context()))).not.toContain(
+        'OVER_LIMIT',
+      );
     });
 
     it.each([
